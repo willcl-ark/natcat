@@ -1,0 +1,40 @@
+stateDiagram-v2
+    [*] --> START
+    START --> LOAD_CONFIG
+    LOAD_CONFIG --> CONNECT_RENDEZVOUS
+    CONNECT_RENDEZVOUS --> REGISTER_IDENTITY
+    REGISTER_IDENTITY --> PROBE_TCP_MAPPING
+
+    PROBE_TCP_MAPPING --> WAIT_FOR_PAIR: candidate stable
+    PROBE_TCP_MAPPING --> PROBE_RETRY: probe failed
+    PROBE_RETRY --> PROBE_TCP_MAPPING
+    PROBE_RETRY --> FAILED: retry budget exhausted
+
+    WAIT_FOR_PAIR --> RECEIVE_SESSION
+    RECEIVE_SESSION --> SELECT_ROLE
+    SELECT_ROLE --> WAIT_FOR_START_TIME
+
+    WAIT_FOR_START_TIME --> PUNCH_CONNECT
+    PUNCH_CONNECT --> PUNCH_CONNECTED: SO_ERROR == 0
+    PUNCH_CONNECT --> PUNCH_WAVE_RETRY: timeout, RST, or EINPROGRESS expired
+    PUNCH_WAVE_RETRY --> PUNCH_CONNECT: next scheduled wave
+    PUNCH_WAVE_RETRY --> REPORT_FAILURE: no waves remain
+
+    PUNCH_CONNECTED --> VERIFY_ENDPOINT
+    VERIFY_ENDPOINT --> IMPORT_TO_CORE: endpoint valid
+    VERIFY_ENDPOINT --> REPORT_FAILURE: endpoint mismatch
+
+    IMPORT_TO_CORE --> CORE_IMPORT_RESPONDER: role = responder
+    IMPORT_TO_CORE --> CORE_IMPORT_INITIATOR: role = initiator
+
+    CORE_IMPORT_RESPONDER --> CORE_OWNS_SOCKET: Core creates inbound CNode
+    CORE_IMPORT_INITIATOR --> CORE_OWNS_SOCKET: Core creates manual CNode
+
+    CORE_OWNS_SOCKET --> REPORT_SUCCESS
+    REPORT_SUCCESS --> MONITOR_PEER
+    MONITOR_PEER --> WAIT_FOR_PAIR: disconnected and retry allowed
+    MONITOR_PEER --> [*]: stopped
+
+    REPORT_FAILURE --> WAIT_FOR_PAIR: retry allowed
+    REPORT_FAILURE --> FAILED: retry budget exhausted
+    FAILED --> [*]
