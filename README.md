@@ -7,6 +7,18 @@ establish a direct TCP connection with a peer whose endpoint you already know.
 Once the TCP connection is up, each line typed into one peer is sent to the
 other peer.
 
+This has been tested between two peers with no firewall, router, VPN provider
+or other configuration required, taking the following approximate packet paths
+between peers:
+
+```
+Peer A
+container -> docker NAT -> host -> router NAT/firewall -> starlink WAN
+
+Peer B
+NixOS Container -> NixOS host -> router NAT/firewall -> Obscura VPN -> WAN
+```
+
 ## Basic Usage
 
 Start both peers without `--peer` to print the endpoint each side should share:
