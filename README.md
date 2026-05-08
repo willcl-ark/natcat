@@ -58,4 +58,10 @@ Bind the peer to a different local UDP/TCP port:
 ./natcat.py peer --bind 0.0.0.0:50001 PEER_PUBLIC_IP:PORT
 ```
 
+Show reconnect and disconnect logs while connecting to a peer:
+
+```sh
+./natcat.py peer --debug PEER_PUBLIC_IP:PORT
+```
+
 Use `--help` for the full option list.
