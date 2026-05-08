@@ -73,13 +73,21 @@ def parse_stun_response(
     while offset + 4 <= end:
         attr_type, attr_len = struct.unpack("!HH", data[offset : offset + 4])
         offset += 4
+        if offset + attr_len > end:
+            return None
         value = data[offset : offset + attr_len]
         offset += (attr_len + 3) & ~3
 
         if attr_type == STUN_XOR_MAPPED_ADDRESS:
-            return decode_stun_address(value, transaction_id, xor=True)
+            try:
+                return decode_stun_address(value, transaction_id, xor=True)
+            except ValueError:
+                return None
         if attr_type == STUN_MAPPED_ADDRESS:
-            mapped = decode_stun_address(value, transaction_id, xor=False)
+            try:
+                mapped = decode_stun_address(value, transaction_id, xor=False)
+            except ValueError:
+                mapped = None
 
     return mapped
 
