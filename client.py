@@ -6,11 +6,10 @@
 
 Manual flow:
 
-    client.py peer --name alice
-    client.py peer --name bob
-    # Copy the printed STUN endpoints, then run both peers with --peer:
-    client.py peer --name alice --peer BOB_PUBLIC_IP:PORT
-    client.py peer --name bob --peer ALICE_PUBLIC_IP:PORT
+    client.py peer
+    # Copy and share the printed STUN endpoint, then run both peers with --peer:
+    client.py peer --peer BOB_PUBLIC_IP:PORT
+    client.py peer --peer ALICE_PUBLIC_IP:PORT
 
 Once the TCP connection is established, lines typed on stdin are sent to the
 peer and displayed on the other side.
@@ -19,14 +18,13 @@ peer and displayed on the other side.
 from __future__ import annotations
 
 import argparse
-import os
 import select
 import socket
 import sys
 import time
 from typing import TextIO
 
-from holepunch import TcpCandidate, TcpPuncher, close_socket
+from holepunch import TcpCandidate, TcpPuncher
 from net import make_udp_socket, resolve_endpoint, short_addr, socket_addr
 from stun import stun_binding
 
@@ -41,10 +39,6 @@ def log(message: str) -> None:
 
 def log_event(kind: str, message: str) -> None:
     log(f"[{kind}] {message}")
-
-
-def default_name() -> str:
-    return f"{socket.gethostname()}-{os.getpid()}"
 
 
 def run_stun(args: argparse.Namespace) -> int:
@@ -81,17 +75,7 @@ def run_peer_stun_probes(
         log_event("TCP manual", f"share with peer: --peer {mapped[0]}:{tcp_port}")
 
 
-def complete_connection(puncher: TcpPuncher, candidate: TcpCandidate, name: str) -> None:
-    try:
-        candidate.sock.sendall(f"{name} joined\n".encode())
-    except OSError as err:
-        close_socket(candidate.sock)
-        if candidate.inbound:
-            log_event("TCP holepunch", f"accepted connection but write failed: {err}")
-        else:
-            log_event("TCP holepunch", f"connected but write failed: {err}")
-            puncher.schedule_retry(time.monotonic())
-        return
+def complete_connection(puncher: TcpPuncher, candidate: TcpCandidate) -> None:
     puncher.adopt_connection(candidate)
 
 
@@ -99,7 +83,6 @@ def run_peer(args: argparse.Namespace) -> int:
     control_sock = make_udp_socket(args.bind)
     control_sock.setblocking(False)
     local_addr = control_sock.getsockname()
-    name = args.name or default_name()
     start_at = time.monotonic() + args.start_delay
     peer = (
         resolve_endpoint(args.peer, control_sock.family, socket.SOCK_STREAM)
@@ -110,7 +93,7 @@ def run_peer(args: argparse.Namespace) -> int:
     if peer is not None:
         puncher.set_peer(peer, start_at)
 
-    log_event("bind", f"UDP STUN and TCP punch port {short_addr(local_addr)} as {name}")
+    log_event("bind", f"UDP STUN and TCP punch port {short_addr(local_addr)}")
     assert puncher.listener is not None
     log_event("TCP listen", f"opened on {socket_addr(puncher.listener)}")
 
@@ -153,7 +136,7 @@ def run_peer(args: argparse.Namespace) -> int:
         if puncher.connector is not None and puncher.connector in writable:
             candidate = puncher.connector_ready(time.monotonic())
             if candidate is not None:
-                complete_connection(puncher, candidate, name)
+                complete_connection(puncher, candidate)
 
         if not readable:
             continue
@@ -178,7 +161,7 @@ def run_peer(args: argparse.Namespace) -> int:
             readable.remove(listener)
             candidate = puncher.accept_ready()
             if candidate is not None:
-                complete_connection(puncher, candidate, name)
+                complete_connection(puncher, candidate)
 
         tcp_sock = puncher.established
         if tcp_sock is not None and tcp_sock in readable:
@@ -230,7 +213,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     peer_parser = subparsers.add_parser("peer", help="run a TCP hole-punch peer")
     add_bind_arg(peer_parser, DEFAULT_BIND, "local UDP STUN and TCP punch endpoint")
-    peer_parser.add_argument("--name", help="local peer name for diagnostics")
     peer_parser.add_argument("--peer", help="peer TCP endpoint host:port")
     peer_parser.add_argument(
         "--stun",
