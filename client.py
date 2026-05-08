@@ -52,7 +52,7 @@ def run_peer(args: argparse.Namespace) -> int:
     control_sock.setblocking(False)
     local_addr = control_sock.getsockname()
     peer = resolve_endpoint(args.peer, control_sock.family, socket.SOCK_STREAM)
-    puncher = TcpPuncher(local_addr, peer, log_event)
+    puncher = TcpPuncher(local_addr, peer, log_event, args.debug)
 
     log_event("bind", f"UDP STUN and TCP punch port {short_addr(local_addr)}")
     assert puncher.listener is not None
@@ -146,6 +146,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="HOST:PORT",
     )
     add_bind_arg(peer_parser, DEFAULT_BIND, "local UDP STUN and TCP punch endpoint")
+    peer_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="show reconnect and disconnect logs",
+    )
     peer_parser.set_defaults(func=run_peer)
 
     return parser

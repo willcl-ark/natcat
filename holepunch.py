@@ -49,10 +49,12 @@ class TcpPuncher:
         bind_addr: Address,
         peer: Address,
         log_event,
+        debug: bool = False,
     ) -> None:
         self.bind_addr = bind_addr
         self.peer = peer
         self.log_event = log_event
+        self.debug = debug
 
         self.listener: Optional[socket.socket] = make_tcp_listener(bind_addr)
         self.connector: Optional[socket.socket] = None
@@ -60,8 +62,17 @@ class TcpPuncher:
         self.connector_started_at = 0.0
         self.established: Optional[socket.socket] = None
 
+        self.connected_once = False
         self.next_connect = 0.0
         self.connect_attempt = 0
+
+    def demo_event(self, kind: str, message: str) -> None:
+        if self.debug or not self.connected_once:
+            self.log_event(kind, message)
+
+    def debug_event(self, kind: str, message: str) -> None:
+        if self.debug:
+            self.log_event(kind, message)
 
     def listener_status(self) -> str:
         if self.listener is None:
@@ -82,7 +93,7 @@ class TcpPuncher:
     def close_connector(self, reason: str) -> None:
         if self.connector is not None:
             age = time.monotonic() - self.connector_started_at
-            self.log_event(
+            self.debug_event(
                 "TCP holepunch",
                 f"{reason}: closing connector {socket_addr(self.connector)} -> "
                 f"{short_addr(self.peer)} after {age:.3f}s; "
@@ -94,7 +105,7 @@ class TcpPuncher:
         self.connector_started_at = 0.0
 
     def reset_connection(self, reason: str) -> None:
-        self.log_event("TCP holepunch", reason)
+        self.debug_event("TCP holepunch", reason)
         close_socket(self.established)
         self.established = None
         self.close_connector("reset")
@@ -124,7 +135,7 @@ class TcpPuncher:
             self.connector_started_at = 0.0
             return TcpCandidate(candidate_sock, self.peer, inbound=False)
 
-        self.log_event(
+        self.debug_event(
             "TCP holepunch",
             f"connect to {short_addr(self.peer)} failed: {os.strerror(err)}",
         )
@@ -149,7 +160,7 @@ class TcpPuncher:
 
         if self.listener is not None:
             direction = "inbound accept" if candidate.inbound else "outbound connect"
-            self.log_event(
+            self.demo_event(
                 "TCP listen",
                 f"closing {socket_addr(self.listener)} after {direction}",
             )
@@ -157,13 +168,17 @@ class TcpPuncher:
         self.listener = None
 
         if candidate.inbound:
-            self.log_event(
+            self.demo_event(
                 "TCP holepunch",
                 f"accepted connection from {short_addr(candidate.peer)}",
             )
         else:
-            self.log_event("TCP holepunch", f"connected to {short_addr(candidate.peer)}")
-        self.log_event("TCP verify", tcp_verify_command(candidate.sock))
+            self.demo_event(
+                "TCP holepunch",
+                f"connected to {short_addr(candidate.peer)}",
+            )
+        self.demo_event("TCP verify", tcp_verify_command(candidate.sock))
+        self.connected_once = True
 
     def _start_connect(self, now: float) -> None:
         try:
@@ -171,15 +186,16 @@ class TcpPuncher:
             self.connect_attempt += 1
             self.connector_expires_at = now + CONNECT_TIMEOUT
             self.connector_started_at = now
-            self.log_event(
-                "TCP holepunch",
+            message = (
                 f"connect attempt #{self.connect_attempt}: "
                 f"{socket_addr(self.connector)} -> {short_addr(self.peer)} "
                 f"timeout={CONNECT_TIMEOUT:.3f}s; "
-                f"listener={self.listener_status()}",
+                f"listener={self.listener_status()}"
             )
+            if self.debug or self.connect_attempt == 1:
+                self.log_event("TCP holepunch", message)
         except OSError as err:
-            self.log_event(
+            self.debug_event(
                 "TCP holepunch",
                 f"connect setup to {short_addr(self.peer)} failed: {err}",
             )
@@ -191,7 +207,7 @@ class TcpPuncher:
         try:
             self.listener = make_tcp_listener(self.bind_addr)
         except OSError as err:
-            self.log_event("TCP listen", f"setup failed: {err}")
+            self.debug_event("TCP listen", f"setup failed: {err}")
             self.listener = None
             return
-        self.log_event("TCP listen", f"reopened on {socket_addr(self.listener)}")
+        self.debug_event("TCP listen", f"reopened on {socket_addr(self.listener)}")
