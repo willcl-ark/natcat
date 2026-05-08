@@ -2,18 +2,7 @@
 # Copyright (c)
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-"""Minimal TCP hole-punch prototype.
-
-Manual flow:
-
-    client.py stun
-    # Copy and share the printed STUN endpoint, then run both peers with it:
-    client.py peer BOB_PUBLIC_IP:PORT
-    client.py peer ALICE_PUBLIC_IP:PORT
-
-Once the TCP connection is established, lines typed on stdin are sent to the
-peer and displayed on the other side.
-"""
+"""Minimal TCP hole-punch prototype."""
 
 from __future__ import annotations
 
