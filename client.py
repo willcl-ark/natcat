@@ -13,14 +13,13 @@ import sys
 import time
 from typing import TextIO
 
-from holepunch import TcpCandidate, TcpPuncher
+from holepunch import TcpPuncher
 from net import make_udp_socket, resolve_endpoint, short_addr, socket_addr
 from stun import stun_binding
 
 
 DEFAULT_BIND = "0.0.0.0:50000"
 DEFAULT_STUN = "stun.fish.foo:3478"
-CONNECT_INTERVAL = 0.25
 STUN_TIMEOUT = 2.0
 
 
@@ -48,18 +47,12 @@ def run_stun(args: argparse.Namespace) -> int:
     return 0
 
 
-def complete_connection(puncher: TcpPuncher, candidate: TcpCandidate) -> None:
-    puncher.adopt_connection(candidate)
-
-
 def run_peer(args: argparse.Namespace) -> int:
     control_sock = make_udp_socket(args.bind)
     control_sock.setblocking(False)
     local_addr = control_sock.getsockname()
-    start_at = time.monotonic()
     peer = resolve_endpoint(args.peer, control_sock.family, socket.SOCK_STREAM)
-    puncher = TcpPuncher(local_addr, CONNECT_INTERVAL, start_at, log_event)
-    puncher.set_peer(peer, start_at)
+    puncher = TcpPuncher(local_addr, peer, log_event)
 
     log_event("bind", f"UDP STUN and TCP punch port {short_addr(local_addr)}")
     assert puncher.listener is not None
@@ -87,7 +80,7 @@ def run_peer(args: argparse.Namespace) -> int:
         if puncher.connector is not None and puncher.connector in writable:
             candidate = puncher.connector_ready(time.monotonic())
             if candidate is not None:
-                complete_connection(puncher, candidate)
+                puncher.adopt_connection(candidate)
 
         if not readable:
             continue
@@ -112,7 +105,7 @@ def run_peer(args: argparse.Namespace) -> int:
             readable.remove(listener)
             candidate = puncher.accept_ready()
             if candidate is not None:
-                complete_connection(puncher, candidate)
+                puncher.adopt_connection(candidate)
 
         tcp_sock = puncher.established
         if tcp_sock is not None and tcp_sock in readable:

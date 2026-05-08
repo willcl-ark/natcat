@@ -22,6 +22,8 @@ from net import (
 
 
 CONNECT_TIMEOUT = 1.0
+PUNCH_INTERVAL = 0.25
+RETRY_DELAY = 1.0
 
 
 def close_socket(sock: Optional[socket.socket]) -> None:
@@ -45,35 +47,21 @@ class TcpPuncher:
     def __init__(
         self,
         bind_addr: Address,
-        interval: float,
-        start_at: float,
+        peer: Address,
         log_event,
-        connect_timeout: float = CONNECT_TIMEOUT,
     ) -> None:
         self.bind_addr = bind_addr
-        self.interval = interval
-        self.start_at = start_at
-        self.connect_timeout = connect_timeout
+        self.peer = peer
         self.log_event = log_event
 
         self.listener: Optional[socket.socket] = make_tcp_listener(bind_addr)
         self.connector: Optional[socket.socket] = None
         self.connector_expires_at = 0.0
-        self.connector_peer: Optional[Address] = None
         self.connector_started_at = 0.0
         self.established: Optional[socket.socket] = None
 
-        self.peer: Optional[Address] = None
         self.next_connect = 0.0
         self.connect_attempt = 0
-
-    @property
-    def connected(self) -> bool:
-        return self.established is not None
-
-    @property
-    def tcp_port(self) -> int:
-        return int(self.bind_addr[1])
 
     def listener_status(self) -> str:
         if self.listener is None:
@@ -91,34 +79,18 @@ class TcpPuncher:
     def write_sockets(self) -> list[socket.socket]:
         return [self.connector] if self.connector is not None else []
 
-    def set_peer(
-        self,
-        peer: Address,
-        start_at: float,
-        close_connector_reason: Optional[str] = None,
-    ) -> None:
-        if close_connector_reason is not None:
-            self.close_connector(close_connector_reason)
-        self.peer = peer
-        self.start_at = start_at
-
     def close_connector(self, reason: str) -> None:
         if self.connector is not None:
             age = time.monotonic() - self.connector_started_at
-            peer_text = (
-                short_addr(self.connector_peer)
-                if self.connector_peer
-                else "<unknown>"
-            )
             self.log_event(
                 "TCP holepunch",
                 f"{reason}: closing connector {socket_addr(self.connector)} -> "
-                f"{peer_text} after {age:.3f}s; listener={self.listener_status()}",
+                f"{short_addr(self.peer)} after {age:.3f}s; "
+                f"listener={self.listener_status()}",
             )
         close_socket(self.connector)
         self.connector = None
         self.connector_expires_at = 0.0
-        self.connector_peer = None
         self.connector_started_at = 0.0
 
     def reset_connection(self, reason: str) -> None:
@@ -134,24 +106,14 @@ class TcpPuncher:
             return
 
         if self.connector is not None and now >= self.connector_expires_at:
-            self.close_connector(f"connect timed out after {self.connect_timeout:.3f}s")
+            self.close_connector(f"connect timed out after {CONNECT_TIMEOUT:.3f}s")
             self.next_connect = now
 
-        if (
-            self.connector is None
-            and self.peer is not None
-            and now >= self.start_at
-            and now >= self.next_connect
-        ):
+        if self.connector is None and now >= self.next_connect:
             self._start_connect(now)
 
     def connector_ready(self, now: float) -> Optional[TcpCandidate]:
         if self.connector is None:
-            return None
-
-        active_peer = self.connector_peer or self.peer
-        if active_peer is None:
-            self.close_connector("connect cancelled: no active peer")
             return None
 
         err = self.connector.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
@@ -159,16 +121,15 @@ class TcpPuncher:
             candidate_sock = self.connector
             self.connector = None
             self.connector_expires_at = 0.0
-            self.connector_peer = None
             self.connector_started_at = 0.0
-            return TcpCandidate(candidate_sock, active_peer, inbound=False)
+            return TcpCandidate(candidate_sock, self.peer, inbound=False)
 
         self.log_event(
             "TCP holepunch",
-            f"connect to {short_addr(active_peer)} failed: {os.strerror(err)}",
+            f"connect to {short_addr(self.peer)} failed: {os.strerror(err)}",
         )
         self.close_connector("connect failed")
-        self.next_connect = now + max(self.interval, 1.0)
+        self.next_connect = now + RETRY_DELAY
         return None
 
     def accept_ready(self) -> Optional[TcpCandidate]:
@@ -204,22 +165,17 @@ class TcpPuncher:
             self.log_event("TCP holepunch", f"connected to {short_addr(candidate.peer)}")
         self.log_event("TCP verify", tcp_verify_command(candidate.sock))
 
-    def schedule_retry(self, now: float) -> None:
-        self.next_connect = now + max(self.interval, 1.0)
-
     def _start_connect(self, now: float) -> None:
-        assert self.peer is not None
         try:
             self.connector = make_tcp_connector(self.bind_addr, self.peer)
             self.connect_attempt += 1
-            self.connector_expires_at = now + self.connect_timeout
-            self.connector_peer = self.peer
+            self.connector_expires_at = now + CONNECT_TIMEOUT
             self.connector_started_at = now
             self.log_event(
                 "TCP holepunch",
                 f"connect attempt #{self.connect_attempt}: "
                 f"{socket_addr(self.connector)} -> {short_addr(self.peer)} "
-                f"timeout={self.connect_timeout:.3f}s; "
+                f"timeout={CONNECT_TIMEOUT:.3f}s; "
                 f"listener={self.listener_status()}",
             )
         except OSError as err:
@@ -227,9 +183,9 @@ class TcpPuncher:
                 "TCP holepunch",
                 f"connect setup to {short_addr(self.peer)} failed: {err}",
             )
-            self.next_connect = now + max(self.interval, 1.0)
+            self.next_connect = now + RETRY_DELAY
         else:
-            self.next_connect = now + self.interval
+            self.next_connect = now + PUNCH_INTERVAL
 
     def _reopen_listener(self) -> None:
         try:
