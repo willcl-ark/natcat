@@ -4,8 +4,8 @@
 mapping with STUN, prints the endpoint to share manually, and then tries to
 establish a direct TCP connection with a peer whose endpoint you already know.
 
-Once the TCP connection is up, each line typed into one peer is sent to the
-other peer.
+Once the TCP connection is up, bytes from stdin are sent to the other peer and
+received bytes are written to stdout.
 
 This has been tested between two peers with no firewall, router, VPN provider
 or other configuration required, taking the following approximate packet paths
@@ -35,7 +35,8 @@ the other's endpoint:
 ./client.py peer ALICE_PUBLIC_IP:PORT
 ```
 
-After the TCP connection is established, type chat lines into either client.
+After the TCP connection is established, type into either client or pipe data
+through stdin.
 
 ## Useful Commands
 

@@ -7,11 +7,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import select
 import socket
 import sys
 import time
-from typing import TextIO
 
 from holepunch import TcpPuncher
 from net import make_udp_socket, resolve_endpoint, short_addr, socket_addr
@@ -24,7 +24,7 @@ STUN_TIMEOUT = 2.0
 
 
 def log(message: str) -> None:
-    print(f"{time.strftime('%H:%M:%S')} {message}", flush=True)
+    print(f"{time.strftime('%H:%M:%S')} {message}", file=sys.stderr, flush=True)
 
 
 def log_event(kind: str, message: str) -> None:
@@ -71,9 +71,9 @@ def run_peer(args: argparse.Namespace) -> int:
 
         timeout = 0.1
 
-        inputs: list[socket.socket | TextIO] = puncher.read_sockets()
-        if read_stdin:
-            inputs.append(sys.stdin)
+        inputs: list[socket.socket | int] = puncher.read_sockets()
+        if read_stdin and puncher.established is not None:
+            inputs.append(sys.stdin.fileno())
         outputs = puncher.write_sockets()
         readable, writable, _errored = select.select(inputs, outputs, [], timeout)
 
@@ -85,20 +85,19 @@ def run_peer(args: argparse.Namespace) -> int:
         if not readable:
             continue
 
-        if sys.stdin in readable:
-            text = sys.stdin.readline()
-            if text == "":
+        stdin_fd = sys.stdin.fileno()
+        if stdin_fd in readable:
+            data = os.read(stdin_fd, 4096)
+            if data == b"":
                 read_stdin = False
             else:
                 tcp_sock = puncher.established
-                if tcp_sock is None:
-                    log_event("TCP chat", "not sent: no TCP connection yet")
-                elif text.rstrip("\n"):
+                if tcp_sock is not None:
                     try:
-                        tcp_sock.sendall(text.encode())
+                        tcp_sock.sendall(data)
                     except OSError as err:
                         reset_connection(f"send failed: {err}")
-            readable.remove(sys.stdin)
+            readable.remove(stdin_fd)
 
         listener = puncher.listener
         if listener is not None and listener in readable:
@@ -121,7 +120,8 @@ def run_peer(args: argparse.Namespace) -> int:
             if data == b"" and puncher.established is not None:
                 reset_connection("peer disconnected")
             elif data:
-                print(data.decode(errors="replace"), end="", flush=True)
+                sys.stdout.buffer.write(data)
+                sys.stdout.buffer.flush()
 
 
 def add_bind_arg(parser: argparse.ArgumentParser, default: str, help_text: str) -> None:
